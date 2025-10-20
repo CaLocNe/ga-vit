@@ -1,192 +1,199 @@
-import telebot
-from telebot import types
+import re
+import unicodedata
+from telegram import (
+    Update,
+    BotCommand,
+    KeyboardButton,
+    ReplyKeyboardMarkup,
+)
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
 
-API_TOKEN = "8260825711:AAGWvHR9B1z_c7GP2vSHvE21gNEwlLItqG4"
-bot = telebot.TeleBot(API_TOKEN)
+TOKEN = "YOUR_BOT_TOKEN"
 
-# Lưu tạm đơn hàng theo user_id
-pending_orders = {}
+LOAI_GA_VIT = ["gà ta", "gà tre", "gà trống", "vịt ta", "vịt xiêm", "vịt huế"]
 
-# Danh sách loại hàng hợp lệ
-LOAI_HOP_LE = ["gà ta", "gà tre", "gà trống", "vịt ta", "vịt xiêm", "vịt huế"]
+# Hàm loại bỏ dấu tiếng Việt và chuẩn hóa text
+def remove_vietnamese_diacritics(text):
+    text = unicodedata.normalize("NFD", text)
+    text = text.encode("ascii", "ignore").decode("utf-8")
+    return str(text).lower()
 
-# --- MENU COMMANDS ---
-bot.set_my_commands([
-    types.BotCommand("start", "Bắt đầu trò chuyện"),
-    types.BotCommand("vit", "Xem giá vịt"),
-    types.BotCommand("ga", "Xem giá gà"),
-    types.BotCommand("thongtin", "Thông tin giao dịch"),
-    types.BotCommand("dathang", "Đặt hàng"),
-    types.BotCommand("cs", "Chỉnh sửa đơn hàng"),
-    types.BotCommand("xacnhan", "Xác nhận đơn hàng")
-])
+# --- /START ---
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.effective_chat.id
+    await context.bot.set_my_commands([
+        BotCommand("start", "Bắt đầu và xem hướng dẫn"),
+        BotCommand("dathang", "Đặt hàng theo cú pháp"),
+        BotCommand("cs", "Chỉnh sửa lại đơn hàng"),
+        BotCommand("xacnhan", "Xác nhận đơn hàng"),
+        BotCommand("thongtin", "Thông tin giao dịch"),
+    ])
 
-# --- LỆNH /START ---
-@bot.message_handler(commands=['start'])
-def send_welcome(message):
-    # Tạo menu nút bấm
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
-    btn1 = types.KeyboardButton("🦆 Xem giá vịt")
-    btn2 = types.KeyboardButton("🐔 Xem giá gà")
-    btn3 = types.KeyboardButton("📍 Thông tin giao dịch")
-    btn4 = types.KeyboardButton("🧾 Đặt hàng ngay")
-    markup.add(btn1, btn2, btn3, btn4)
+    keyboard = [
+        [KeyboardButton("Đặt Hàng")],
+        [KeyboardButton("Hướng Dẫn")],
+        [KeyboardButton("Liên Hệ")],
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
-    text = (
-        "👋 *Xin Chào!* Mình là *Hứa Thịnh* 🐔🦆\n"
-        "Rất vui được hỗ trợ bạn!\n\n"
-        "📋 *Các lệnh có sẵn:*\n"
+    message = (
+        "👋 Xin chào! Mình là **Hứa Thịnh**, rất vui được hỗ trợ bạn!\n\n"
+        "📋 Các lệnh có sẵn:\n"
         "/vit — Xem giá vịt\n"
         "/ga — Xem giá gà\n"
         "/thongtin — Thông tin giao dịch\n"
         "/dathang — Đặt hàng nhanh\n"
         "/cs — Chỉnh sửa lại đơn hàng\n"
         "/xacnhan — Xác nhận đơn hàng\n\n"
-        "🧾 *Hướng dẫn đặt hàng:*\n"
-        "`/dathang <số lượng> <loại> <cân nặng> <số điện thoại> <tên>`\n\n"
-        "📦 *Ví dụ:* \n"
-        "`/dathang 2 vịt huế 5 0363135487 Nguyễn Văn A`\n\n"
-        "Hoặc chọn nhanh bằng nút bên dưới ⬇️"
+        "📦 Hướng dẫn đặt hàng:\n"
+        "/dathang <số lượng> <loại> <cân nặng> <số điện thoại> <tên>\n"
+        "🧾 Ví dụ: `/dathang 2 vịt xiêm 5kg 0363135487 Nguyễn Văn A`\n\n"
+        "💬 Hoặc bạn chỉ cần nhắn ví dụ như:\n"
+        "`2 gà ta 3kg 0912345678 Nguyễn Văn A`\n"
+        "Bot sẽ tự hiểu và tạo đơn hàng giúp bạn!"
+    )
+    await context.bot.send_message(chat_id=chat_id, text=message, reply_markup=reply_markup, parse_mode="Markdown")
+
+# --- /VIT ---
+async def vit(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🦆 Giá vịt hiện có:\n"
+        "- Vịt Ta: 90.000đ/kg\n"
+        "- Vịt Xiêm: 100.000đ/kg\n"
+        "- Vịt Huế: chưa xác định"
     )
 
-    bot.send_message(message.chat.id, text, parse_mode="Markdown", reply_markup=markup)
-
-# --- NÚT MENU XỬ LÝ ---
-@bot.message_handler(func=lambda message: True)
-def handle_buttons(message):
-    text = message.text.lower()
-
-    if "xem giá vịt" in text:
-        send_vit(message)
-    elif "xem giá gà" in text:
-        send_ga(message)
-    elif "thông tin" in text:
-        send_thongtin(message)
-    elif "đặt hàng" in text:
-        huong_dan_dathang(message)
-    else:
-        bot.reply_to(message, "❓ Mình chưa hiểu ý bạn, vui lòng chọn trong menu hoặc gõ /start để xem hướng dẫn.")
-
-# --- LỆNH /VIT ---
-def send_vit(message):
-    text = (
-        "Dưới đây là mức giá của các loại vịt mà mình có bán:\n"
-        "🦆 Vịt Ta: 90.000vnđ/kg\n"
-        "🦆 Vịt Xiêm: 100.000vnđ/kg\n"
-        "🦆 Vịt Huế: chưa xác định"
+# --- /GA ---
+async def ga(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "🐔 Giá gà hiện có:\n"
+        "- Gà Ta, Tre: 130.000đ/kg\n"
+        "- Gà Trống (Cựa): chưa xác định"
     )
-    bot.reply_to(message, text)
 
-# --- LỆNH /GA ---
-def send_ga(message):
-    text = (
-        "Đây là giá tiền các loại gà mình có bán:\n"
-        "🐔 Gà Ta: 130.000/kg\n"
-        "🐔 Gà Tre: 130.000/kg\n"
-        "🐔 Gà Trống (Cựa): chưa xác định"
+# --- /THONGTIN ---
+async def thongtin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "📍 **Thông Tin Giao Dịch**\n"
+        "Địa điểm: Chợ P2 (Chợ Nhật Lệ Cũ), Sóc Trăng - TP Cần Thơ\n"
+        "⏰ Thời gian: 6h30 sáng - 9h sáng hàng ngày\n\n"
+        "📞 Liên hệ:\n"
+        "  0329726487 (Chú Đẹp)\n"
+        "  0363135487 (Hứa Thịnh)\n\n"
+        "⚠️ *Chỉ nhận đặt trước từ 11h trưa - 22h hàng ngày*\n"
+        "_Khi đến chợ, muốn tìm Chú Đẹp, hãy hỏi 'Chỗ Chú Đẹp bán vịt'_",
+        parse_mode="Markdown"
     )
-    bot.reply_to(message, text)
 
-# --- LỆNH /THONGTIN ---
-def send_thongtin(message):
-    text = (
-        "📍 *Thông Tin Giao Dịch:*\n"
-        "Địa Điểm: Chợ P2 (Chợ Nhật Lệ Cũ), Tỉnh Sóc Trăng, TP Cần Thơ\n"
-        "Thời Gian: 6h30 Sáng - 9h Sáng Hàng Ngày\n"
-        "Số Điện Thoại:\n"
-        "  📞 0329726487 (Chú Đẹp)\n"
-        "  📞 0363135487 (Hứa Thịnh)\n"
-        "\n*Lưu Ý:*\n"
-        "- Chỉ Nhận Đặt Trước Từ 11h Trưa - 22h Hàng Ngày\n"
-        "- Khi Đến Chợ P2 Muốn Tìm Chú Đẹp Chỉ Cần Hỏi 'Chỗ Chú Đẹp Bán Vịt'\n"
-        "\nXin Cảm Ơn! 🙏"
-    )
-    bot.reply_to(message, text, parse_mode="Markdown")
-
-# --- HƯỚNG DẪN ĐẶT HÀNG ---
-def huong_dan_dathang(message):
-    text = (
-        "🧾 *Hướng dẫn đặt hàng:*\n"
-        "Hãy nhập theo cú pháp sau:\n"
-        "`/dathang <số lượng> <loại> <cân nặng> <số điện thoại> <tên>`\n\n"
-        "📦 Ví dụ:\n"
-        "`/dathang 2 vịt ta 5 0363135487 Nguyễn Văn A`"
-    )
-    bot.reply_to(message, text, parse_mode="Markdown")
-
-# --- LỆNH /DATHANG ---
-@bot.message_handler(commands=['dathang'])
-def dat_hang(message):
-    try:
-        parts = message.text.split(" ", 5)
-        if len(parts) < 6:
-            bot.reply_to(message,
-                "❌ Sai cú pháp!\n\nĐúng định dạng là:\n"
-                "`/dathang <số lượng> <loại> <cân nặng> <số điện thoại> <tên>`",
-                parse_mode="Markdown")
-            return
-
-        soluong = parts[1]
-        loai = parts[2].lower()
-        cannang = parts[3]
-        sdt = parts[4]
-        ten = parts[5]
-
-        # Kiểm tra loại hợp lệ
-        if loai not in LOAI_HOP_LE:
-            danh_sach = ", ".join(LOAI_HOP_LE)
-            bot.reply_to(message,
-                f"⚠️ Loại hàng bạn nhập không hợp lệ.\n"
-                f"Vui lòng chọn 1 trong các loại sau:\n`{danh_sach}`",
-                parse_mode="Markdown")
-            return
-
-        order_text = (
-            f"🧾 *Đơn Hàng Mới:*\n"
-            f"👤 Tên: {ten}\n"
-            f"📞 SĐT: {sdt}\n"
-            f"🐔 Loại: {loai.title()}\n"
-            f"⚖️ Cân Nặng: {cannang} kg\n"
-            f"📦 Số Lượng: {soluong}\n"
-            "\n✅ *Cảm ơn bạn đã đặt hàng!* Mình sẽ liên hệ xác nhận sớm nhất.\n\n"
-            "Nếu thông tin đã chính xác vui lòng trả lời bằng /xacnhan\n"
-            "Hoặc nếu chưa đúng hãy trả lời bằng /cs để nhập lại đơn hàng."
+# --- /DATHANG ---
+async def dathang(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    args = context.args
+    if len(args) < 5:
+        await update.message.reply_text(
+            "⚠️ Cú pháp chưa đúng!\n"
+            "Hãy dùng: /dathang <số lượng> <loại> <cân nặng> <số điện thoại> <tên người đặt>"
         )
-
-        pending_orders[message.from_user.id] = order_text
-        bot.reply_to(message, order_text, parse_mode="Markdown")
-
-    except Exception as e:
-        bot.reply_to(message, f"⚠️ Có lỗi xảy ra: {e}")
-
-# --- LỆNH /CS ---
-@bot.message_handler(commands=['cs'])
-def chinh_sua(message):
-    if message.from_user.id in pending_orders:
-        del pending_orders[message.from_user.id]
-    bot.reply_to(message,
-        "🔄 Hãy nhập lại đơn hàng theo cú pháp:\n"
-        "`/dathang <số lượng> <loại> <cân nặng> <số điện thoại> <tên>`",
-        parse_mode="Markdown")
-
-# --- LỆNH /XACNHAN ---
-@bot.message_handler(commands=['xacnhan'])
-def xac_nhan(message):
-    if message.from_user.id not in pending_orders:
-        bot.reply_to(message, "❗ Bạn chưa có đơn hàng nào cần xác nhận.")
         return
 
-    order = pending_orders[message.from_user.id]
+    so_luong = args[0]
+    loai = args[1]
+    if args[1] + " " + args[2] in LOAI_GA_VIT:
+        loai = args[1] + " " + args[2]
+        args.pop(2)
 
-    try:
-        bot.send_message("@huathinh", f"📩 *Đơn hàng mới được xác nhận:*\n\n{order}", parse_mode="Markdown")
-        bot.reply_to(message, "✅ Đơn hàng của bạn đã được gửi đến Hứa Thịnh. Cảm ơn bạn rất nhiều! 🙏")
-        del pending_orders[message.from_user.id]
-    except Exception:
-        bot.reply_to(message,
-            "⚠️ Không thể gửi tin nhắn đến @huathinh.\n"
-            "Vui lòng kiểm tra xem tài khoản @huathinh đã từng nhắn tin với bot trước chưa (Telegram yêu cầu vậy).")
+    can_nang = args[-3]
+    sdt = args[-2]
+    ten = " ".join(args[-1:])
 
-# --- CHẠY BOT ---
-print("✅ Bot đang chạy...")
-bot.infinity_polling()
+    msg = (
+        f"🧾 **Xác nhận đơn hàng:**\n\n"
+        f"Số lượng: {so_luong}\n"
+        f"Loại: {loai}\n"
+        f"Cân nặng: {can_nang}\n"
+        f"Số điện thoại: {sdt}\n"
+        f"Tên người đặt: {ten}\n\n"
+        "✅ Nếu thông tin đúng, trả lời /xacnhan\n"
+        "❌ Nếu sai, trả lời /cs để nhập lại."
+    )
+
+    context.user_data["xacnhan_msg"] = msg
+    await update.message.reply_text(msg, parse_mode="Markdown")
+
+# --- /CS ---
+async def cs(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("🔄 Hãy nhập lại đơn hàng theo cú pháp /dathang ...")
+
+# --- /XACNHAN ---
+async def xacnhan(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    msg = context.user_data.get("xacnhan_msg", None)
+    if not msg:
+        await update.message.reply_text("⚠️ Không có đơn hàng nào để xác nhận.")
+        return
+
+    await update.message.reply_text("✅ Đơn hàng đã được xác nhận và gửi đến quản lý!")
+    await context.bot.send_message("@huathinh", f"📩 Đơn hàng mới:\n{msg}")
+
+# --- XỬ LÝ TIN NHẮN TỰ NHIÊN ---
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text
+    normalized = remove_vietnamese_diacritics(text)
+
+    # Nhận diện từ menu
+    if normalized == "dat hang":
+        await update.message.reply_text("💬 Hãy nhập cú pháp: /dathang <số lượng> <loại> <cân nặng> <số điện thoại> <tên>")
+        return
+    elif normalized == "huong dan":
+        await update.message.reply_text("📦 Dùng /dathang để đặt hàng nhanh hoặc nhắn tự nhiên như: '1 vịt xiêm 2kg 0393135487 Thịnh'")
+        return
+    elif normalized == "lien he":
+        await thongtin(update, context)
+        return
+
+    # Regex nhận diện đơn hàng
+    pattern = r"(\d+)\s+(ga|vit)(?:\s+(ta|tre|trong|xiem|hue))?\s+(\d+(?:kg)?)\s+(\d{9,11})\s+([\w\sÀ-ỹ]+)"
+    match = re.search(pattern, normalized)
+    if match:
+        so_luong = match.group(1)
+        loai = match.group(2)
+        phu_loai = match.group(3) if match.group(3) else ""
+        can_nang = match.group(4)
+        sdt = match.group(5)
+        ten = match.group(6).title()
+
+        full_loai = (loai + " " + phu_loai).strip()
+
+        msg = (
+            f"🧾 **Xác nhận đơn hàng:**\n\n"
+            f"Số lượng: {so_luong}\n"
+            f"Loại: {full_loai}\n"
+            f"Cân nặng: {can_nang}\n"
+            f"Số điện thoại: {sdt}\n"
+            f"Tên người đặt: {ten}\n\n"
+            "✅ Nếu đúng, trả lời /xacnhan\n"
+            "❌ Nếu sai, trả lời /cs để nhập lại."
+        )
+
+        context.user_data["xacnhan_msg"] = msg
+        await update.message.reply_text(msg, parse_mode="Markdown")
+    else:
+        await update.message.reply_text("❓ Mình chưa hiểu ý bạn, hãy gõ /start để xem hướng dẫn hoặc chọn trong menu nhé.")
+
+# --- MAIN ---
+app = ApplicationBuilder().token(TOKEN).build()
+app.add_handler(CommandHandler("start", start))
+app.add_handler(CommandHandler("vit", vit))
+app.add_handler(CommandHandler("ga", ga))
+app.add_handler(CommandHandler("thongtin", thongtin))
+app.add_handler(CommandHandler("dathang", dathang))
+app.add_handler(CommandHandler("cs", cs))
+app.add_handler(CommandHandler("xacnhan", xacnhan))
+app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+if __name__ == "__main__":
+    app.run_polling()
