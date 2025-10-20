@@ -14,7 +14,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
-TOKEN = "YOUR_BOT_TOKEN"
+TOKEN = "8260825711:AAGWvHR9B1z_c7GP2vSHvE21gNEwlLItqG4"
 
 LOAI_GA_VIT = ["gà ta", "gà tre", "gà trống", "vịt ta", "vịt xiêm", "vịt huế"]
 
